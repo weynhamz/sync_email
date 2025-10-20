@@ -31,6 +31,22 @@ except ImportError:
     OAUTH2_AVAILABLE = False
 
 
+def check_virtual_environment():
+    """Check if running in a virtual environment and provide guidance."""
+    in_venv = hasattr(sys, 'real_prefix') or (
+        hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix
+    )
+    
+    if not in_venv and os.path.exists('venv') and not os.environ.get('SYNC_MAIL_SKIP_VENV_CHECK'):
+        print("⚠️  Warning: Virtual environment detected but not activated")
+        print("   Recommended: source venv/bin/activate  (Linux/macOS)")
+        print("   Recommended: venv\\Scripts\\activate     (Windows)")
+        print("   Or set SYNC_MAIL_SKIP_VENV_CHECK=1 to skip this check")
+        print()
+    
+    return in_venv
+
+
 class IMAPSync:
     """Main class for IMAP email synchronization."""
     
@@ -341,10 +357,16 @@ def main():
                        help='Configuration file path (default: config.json)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Perform a dry run without deleting emails')
+    parser.add_argument('--skip-venv-check', action='store_true',
+                       help='Skip virtual environment check')
     
     args = parser.parse_args()
     
     try:
+        # Check virtual environment
+        if not args.skip_venv_check:
+            check_virtual_environment()
+        
         # Initialize and run sync
         sync = IMAPSync(args.config)
         

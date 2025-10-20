@@ -1,0 +1,80 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "./venv/bin/python"
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.pylint",
+            "ms-python.black-formatter",
+            "ms-python.isort",
+            "ms-python.mypy-type-checker"
+        ]
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "Setup Project",
+                "type": "shell",
+                "command": "./setup.sh",
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "shared",
+                    "showReuseMessage": true
+                },
+                "problemMatcher": []
+            },
+            {
+                "label": "Run Sync (Dry Run)",
+                "type": "shell",
+                "command": "${workspaceFolder}/venv/bin/python",
+                "args": ["sync_mail.py", "--dry-run"],
+                "group": "test",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "shared"
+                },
+                "problemMatcher": []
+            },
+            {
+                "label": "Run Tests",
+                "type": "shell", 
+                "command": "${workspaceFolder}/venv/bin/python",
+                "args": ["-m", "pytest", "-v"],
+                "group": "test",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "shared"
+                },
+                "problemMatcher": []
+            },
+            {
+                "label": "Format Code",
+                "type": "shell",
+                "command": "${workspaceFolder}/venv/bin/python",
+                "args": ["-m", "black", "."],
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "silent",
+                    "focus": false,
+                    "panel": "shared"
+                },
+                "problemMatcher": []
+            }
+        ]
+    }
+}

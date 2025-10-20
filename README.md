@@ -20,19 +20,66 @@ A Python script for synchronizing emails between two IMAP mailboxes. This tool c
 
 ## Quick Start
 
-### Basic Setup
+### 🚀 Automated Setup (Recommended)
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+**One-command setup with virtual environment:**
 
-2. Copy and configure the settings:
-   ```bash
-   cp config.example.json config.json
-   ```
+```bash
+./setup.sh
+```
 
-3. Edit `config.json` with your IMAP server details.
+This script will:
+- Create and activate a Python virtual environment
+- Install all dependencies
+- Set up configuration files
+- Validate the installation
+
+### 📋 Manual Setup
+
+#### 1. Create Virtual Environment (Recommended)
+
+```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+# On Linux/macOS:
+source venv/bin/activate
+# On Windows:
+venv\Scripts\activate
+```
+
+#### 2. Install Dependencies
+
+```bash
+# Install main dependencies
+pip install -r requirements.txt
+
+# Optional: Install development tools
+pip install -r requirements-dev.txt
+```
+
+#### 3. Configure the Application
+
+```bash
+# For password authentication:
+cp config.example.json config.json
+
+# For Gmail OAuth2:
+cp config.oauth2.example.json config.json
+
+# Edit config.json with your settings
+```
+
+### 💡 Quick Test
+
+```bash
+# Test configuration
+python config_helper.py validate
+
+# Test sync (dry run - no emails deleted)
+python sync_mail.py --dry-run
+```
 
 ### Gmail OAuth2 Setup
 
@@ -50,6 +97,88 @@ For Gmail accounts, OAuth2 is recommended over app passwords:
    python oauth2_helper.py --setup  # Show setup instructions
    python oauth2_helper.py --test   # Test configuration
    ```
+
+## Virtual Environment Management
+
+### 🔄 Daily Usage
+
+**Activate virtual environment** (do this each time you use the tool):
+
+```bash
+# Linux/macOS
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
+```
+
+**Deactivate when done:**
+```bash
+deactivate
+```
+
+### 📦 Dependency Management
+
+**Add new dependencies:**
+```bash
+pip install package-name
+pip freeze > requirements.txt  # Update requirements
+```
+
+**Update existing dependencies:**
+```bash
+pip install -r requirements.txt --upgrade
+```
+
+**Development environment:**
+```bash
+pip install -r requirements-dev.txt  # Install linting, testing tools
+```
+
+### 🛠️ Development Tools
+
+With development dependencies installed:
+
+```bash
+# Format code
+black *.py
+
+# Sort imports
+isort *.py
+
+# Run linting
+flake8 *.py
+
+# Run type checking
+mypy sync_mail.py
+
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=. --cov-report=html
+```
+
+### 🔍 Environment Check
+
+**Check your setup** at any time:
+
+```bash
+python env_check.py
+```
+
+This comprehensive check will verify:
+- ✅ Python version compatibility
+- 📦 Virtual environment status  
+- 📚 Required and optional dependencies
+- ⚙️ Configuration file validity
+- 🔐 OAuth2 setup status
+- 📄 Project file integrity
+
+**Quick environment info:**
+```bash
+python sync_mail.py --help  # Also shows venv warning if needed
+```
 
 ## Configuration
 
@@ -149,6 +278,51 @@ Logs are written to `sync_mail.log` with timestamps and operation details.
 - Use app-specific passwords when available
 - Consider using environment variables for sensitive data
 - Test with non-critical emails first
+
+## Development Setup Summary
+
+### 🎯 One-Command Setup
+```bash
+./setup.sh  # Creates venv, installs dependencies, sets up config
+```
+
+### 📁 Project Structure
+```
+sync_mail/
+├── setup.sh                      # Automated setup script
+├── env_check.py                   # Environment validation
+├── requirements.txt               # Main dependencies  
+├── requirements-dev.txt           # Development tools
+├── sync_mail.code-workspace       # VS Code workspace
+├── .vscode/settings.json          # VS Code Python settings
+├── venv/                          # Virtual environment (created by setup)
+├── sync_mail.py                   # Main application
+├── oauth2_helper.py               # OAuth2 authentication
+├── config_helper.py               # Configuration utilities
+└── OAUTH2_SETUP.md               # OAuth2 setup guide
+```
+
+### 🔧 VS Code Integration
+- **Automatic Python interpreter** detection (`./venv/bin/python`)
+- **Built-in tasks**: Setup, Test, Format, Run Sync
+- **Code quality** tools: Black, isort, Flake8, Pylint, MyPy
+- **Testing integration** with pytest
+- **Recommended extensions** for Python development
+
+### ⚡ Quick Commands
+```bash
+# Setup and activate environment
+./setup.sh && source venv/bin/activate
+
+# Validate everything
+python env_check.py
+
+# Test configuration
+python config_helper.py validate
+
+# Run sync (safe mode)
+python sync_mail.py --dry-run
+```
 
 ## License
 

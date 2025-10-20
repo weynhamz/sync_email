@@ -8,6 +8,7 @@ token.json
 
 # Logs
 *.log
+sync_mail.log
 
 # Python cache
 __pycache__/
@@ -19,12 +20,24 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
 
-# IDE files
-.vscode/
+# IDE files (keep project VS Code settings)
 .idea/
 *.swp
 *.swo
+
+# Testing and development
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Development tools output
+.black
+.isort.cfg
 
 # OS files
 .DS_Store
@@ -33,3 +46,21 @@ Thumbs.db
 # Email data (if any temporary files are created)
 *.eml
 temp_emails/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg

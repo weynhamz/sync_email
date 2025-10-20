@@ -1,0 +1,35 @@
+# Development Dependencies for Email Sync Project
+# Install with: pip install -r requirements-dev.txt
+
+# Testing frameworks
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+
+# Code quality tools
+black>=23.7.0          # Code formatter
+isort>=5.12.0          # Import sorter
+flake8>=6.0.0          # Linting
+pylint>=2.17.0         # Advanced linting
+mypy>=1.5.0            # Type checking
+
+# Documentation tools
+sphinx>=7.1.0          # Documentation generator
+sphinx-rtd-theme>=1.3.0 # ReadTheDocs theme
+
+# Development utilities
+ipython>=8.14.0        # Enhanced Python shell
+jupyter>=1.0.0         # Jupyter notebooks for development
+pre-commit>=3.3.0      # Git hooks for code quality
+
+# Security scanning
+bandit>=1.7.5          # Security linter
+safety>=2.3.0          # Dependency vulnerability scanner
+
+# Performance profiling
+memory-profiler>=0.61.0
+line-profiler>=4.1.0
+
+# Additional testing utilities for email/IMAP testing
+responses>=0.23.0      # Mock HTTP requests
+freezegun>=1.2.0       # Time mocking for tests
