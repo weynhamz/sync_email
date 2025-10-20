@@ -341,6 +341,56 @@ class IMAPSync:
         except Exception:
             return ''
     
+    def _apply_to_delete_marker(self, conn: imaplib.IMAP4_SSL, msg_id_str: str, server: str) -> bool:
+        """Apply _TO_DELETE label for Gmail or move to _TO_DELETE folder for other servers."""
+        try:
+            if is_gmail_server(server):
+                # For Gmail, add the _TO_DELETE label
+                try:
+                    # Add the label using Gmail's X-GM-LABELS extension
+                    status, response = conn.store(msg_id_str, '+X-GM-LABELS', '("_TO_DELETE")')
+                    if status == 'OK':
+                        self.logger.debug(f"Added _TO_DELETE label to Gmail message {msg_id_str}")
+                        return True
+                    else:
+                        # Fallback: try standard IMAP flags if X-GM-LABELS doesn't work
+                        status, response = conn.store(msg_id_str, '+FLAGS', '(_TO_DELETE)')
+                        return status == 'OK'
+                except Exception as e:
+                    self.logger.debug(f"Gmail label failed, trying standard flag: {e}")
+                    # Fallback to standard IMAP flag
+                    status, response = conn.store(msg_id_str, '+FLAGS', '(_TO_DELETE)')
+                    return status == 'OK'
+            else:
+                # For other IMAP servers, try to move to _TO_DELETE folder
+                try:
+                    # First, ensure the _TO_DELETE folder exists
+                    try:
+                        conn.create('_TO_DELETE')
+                    except Exception:
+                        pass  # Folder might already exist
+                    
+                    # Move the message to _TO_DELETE folder
+                    status, response = conn.move(msg_id_str, '_TO_DELETE')
+                    if status == 'OK':
+                        self.logger.debug(f"Moved message {msg_id_str} to _TO_DELETE folder")
+                        return True
+                    else:
+                        # Fallback: copy and mark for deletion if move doesn't work
+                        status, response = conn.copy(msg_id_str, '_TO_DELETE')
+                        if status == 'OK':
+                            self.logger.debug(f"Copied message {msg_id_str} to _TO_DELETE folder")
+                            return True
+                        return False
+                except Exception as e:
+                    self.logger.debug(f"Failed to move/copy message to _TO_DELETE folder: {e}")
+                    # Final fallback: just add a flag
+                    status, response = conn.store(msg_id_str, '+FLAGS', '(_TO_DELETE)')
+                    return status == 'OK'
+        except Exception as e:
+            self.logger.error(f"Error applying _TO_DELETE marker: {e}")
+            return False
+    
     def verify_message_exists(self, conn: imaplib.IMAP4_SSL, folder: str, 
                             message_info: Dict) -> bool:
         """Verify if a message exists in the target mailbox."""
@@ -392,22 +442,27 @@ class IMAPSync:
     
     def delete_message(self, conn: imaplib.IMAP4_SSL, message_id: bytes, 
                       dry_run: bool = False, message_subject: str = '', 
-                      current_index: int = 0, total_count: int = 0, deletion_count: int = 0) -> bool:
+                      current_index: int = 0, total_count: int = 0, deletion_count: int = 0, 
+                      server: str = '') -> bool:
         """Delete a message from the mailbox."""
         try:
             # Convert message_id to string for consistency
             msg_id_str = message_id.decode() if isinstance(message_id, bytes) else str(message_id)
             
             if dry_run:
-                if message_subject and deletion_count > 0 and total_count > 0:
-                    self.logger.info(f"({deletion_count} of {total_count}) DRY RUN: Would delete message (ID: {msg_id_str}) - Subject: {message_subject}")
-                elif message_subject and deletion_count > 0:
-                    self.logger.info(f"DRY RUN: Would delete message #{deletion_count} (ID: {msg_id_str}) - Subject: {message_subject}")
-                elif message_subject:
-                    self.logger.info(f"DRY RUN: Would delete message {msg_id_str} - Subject: {message_subject}")
+                # Instead of just logging, apply _TO_DELETE label/folder for dry run
+                success = self._apply_to_delete_marker(conn, msg_id_str, server)
+                if success:
+                    if message_subject and deletion_count > 0 and total_count > 0:
+                        self.logger.info(f"({deletion_count} of {total_count}) DRY RUN: Would delete message - ID: {msg_id_str} - Subject: {message_subject}")
+                    else:
+                        self.logger.info(f"DRY RUN: Would delete message - ID: {msg_id_str}")
                 else:
-                    self.logger.info(f"DRY RUN: Would delete message {msg_id_str}")
-                return True
+                    if message_subject and deletion_count > 0 and total_count > 0:
+                        self.logger.warning(f"({deletion_count} of {total_count}) DRY RUN: Would delete message - ID: {msg_id_str} - Subject: {message_subject}")
+                    else:
+                        self.logger.warning(f"DRY RUN: Failed to apply _TO_DELETE marker to message {msg_id_str}")
+                return success
             
             # Mark message for deletion (convert back to string for store command)
             conn.store(msg_id_str, '+FLAGS', '\\Deleted')
@@ -472,7 +527,7 @@ class IMAPSync:
                         deletion_count += 1
                         
                         # Delete from source if verified
-                        if self.delete_message(self.source_conn, message_id, dry_run, display_subject, current_index, total_count, deletion_count):
+                        if self.delete_message(self.source_conn, message_id, dry_run, display_subject, current_index, total_count, deletion_count, source_server):
                             results['deleted'] += 1
                         else:
                             results['errors'] += 1
