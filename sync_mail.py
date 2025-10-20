@@ -243,11 +243,23 @@ class IMAPSync:
     def get_message_info(self, conn: imaplib.IMAP4_SSL, message_id: bytes) -> Dict:
         """Get message information for verification."""
         try:
-            status, message_data = conn.fetch(message_id, '(RFC822.HEADER)')
+            # Convert bytes to string for IMAP fetch command
+            if isinstance(message_id, bytes):
+                msg_id_str = message_id.decode('utf-8')
+            else:
+                msg_id_str = str(message_id)
+            
+            status, message_data = conn.fetch(msg_id_str, '(RFC822.HEADER)')
             if status != 'OK':
                 raise Exception(f"Failed to fetch message {message_id}")
             
+            if not message_data or not message_data[0] or len(message_data[0]) < 2:
+                raise Exception(f"Invalid message data for {message_id}")
+                
             raw_email = message_data[0][1]
+            if not raw_email or not isinstance(raw_email, bytes):
+                raise Exception(f"Invalid message content for {message_id}")
+                
             email_message = email.message_from_bytes(raw_email)
             
             # Extract key information for matching
@@ -261,7 +273,7 @@ class IMAPSync:
                 'from': from_addr,
                 'message_id': message_id_header,
                 'date': date,
-                'uid': message_id.decode()
+                'uid': message_id.decode() if isinstance(message_id, bytes) else str(message_id)
             }
             
         except Exception as e:
@@ -269,7 +281,7 @@ class IMAPSync:
             raise
     
     def _decode_header(self, header_value: str) -> str:
-        """Decode email header value."""
+        """Decode email header value with improved Unicode handling."""
         if not header_value:
             return ''
         
@@ -279,13 +291,55 @@ class IMAPSync:
             
             for part, encoding in decoded_parts:
                 if isinstance(part, bytes):
-                    decoded_string += part.decode(encoding or 'utf-8')
+                    # Try specific encoding first, then fallback to utf-8, then latin-1
+                    try:
+                        decoded_string += part.decode(encoding or 'utf-8')
+                    except (UnicodeDecodeError, LookupError):
+                        try:
+                            decoded_string += part.decode('utf-8')
+                        except UnicodeDecodeError:
+                            decoded_string += part.decode('latin-1', errors='replace')
                 else:
-                    decoded_string += part
+                    decoded_string += str(part)
                     
             return decoded_string
+        except Exception as e:
+            # Return sanitized version if all else fails
+            try:
+                return str(header_value).encode('ascii', errors='replace').decode('ascii')
+            except Exception:
+                return f"[Encoding Error: {str(e)}]"
+    
+    def _safe_log_string(self, text: str) -> str:
+        """Create a safe ASCII representation of text for logging."""
+        if not text:
+            return ''
+        try:
+            # Try to encode as ASCII, replacing non-ASCII characters
+            return text.encode('ascii', errors='replace').decode('ascii')
         except Exception:
-            return header_value
+            return '[Encoding Error]'
+    
+    def _safe_search_string(self, text: str) -> str:
+        """Create a safe ASCII string for IMAP search commands."""
+        if not text:
+            return ''
+        try:
+            # Extract ASCII-only parts, skip non-ASCII to avoid IMAP errors
+            ascii_text = ''.join(char for char in text if ord(char) < 128 and char.isprintable())
+            # Remove extra spaces and quotes that could break IMAP search
+            cleaned = ' '.join(ascii_text.replace('"', '').split())
+            # Only return if we have meaningful text
+            if len(cleaned) >= 3:
+                # For email addresses, preserve them as-is
+                if '@' in cleaned and '.' in cleaned:
+                    return cleaned
+                # For other text, only return if it has some letters
+                elif any(c.isalpha() for c in cleaned):
+                    return cleaned
+            return ''
+        except Exception:
+            return ''
     
     def verify_message_exists(self, conn: imaplib.IMAP4_SSL, folder: str, 
                             message_info: Dict) -> bool:
@@ -296,24 +350,39 @@ class IMAPSync:
             
             # Search by Message-ID first (most reliable)
             if message_info['message_id']:
-                status, message_ids = conn.search(
-                    None, f'HEADER "Message-ID" "{message_info["message_id"]}"'
-                )
-                if status == 'OK' and message_ids[0]:
-                    return True
+                try:
+                    # Clean Message-ID for search (remove angle brackets if present)
+                    clean_msg_id = message_info['message_id'].strip('<>')
+                    status, message_ids = conn.search(
+                        None, f'HEADER "Message-ID" "{clean_msg_id}"'
+                    )
+                    if status == 'OK' and message_ids[0]:
+                        return True
+                except Exception as e:
+                    self.logger.debug(f"Message-ID search failed: {e}")
+                    # Continue to fallback search
             
-            # Fallback: search by subject and from
-            search_criteria = []
+            # Fallback: search by subject and from (sanitize non-ASCII characters)
+            # Try individual searches to avoid complex search string parsing issues
             if message_info['subject']:
-                search_criteria.append(f'SUBJECT "{message_info["subject"]}"')
-            if message_info['from']:
-                search_criteria.append(f'FROM "{message_info["from"]}"')
+                try:
+                    safe_subject = self._safe_search_string(message_info['subject'])
+                    if safe_subject and len(safe_subject) >= 5:  # Meaningful subject search
+                        status, message_ids = conn.search(None, f'SUBJECT "{safe_subject}"')
+                        if status == 'OK' and message_ids[0]:
+                            return True
+                except Exception as e:
+                    self.logger.debug(f"Subject search failed: {e}")
             
-            if search_criteria:
-                search_string = ' '.join(search_criteria)
-                status, message_ids = conn.search(None, search_string)
-                if status == 'OK' and message_ids[0]:
-                    return True
+            if message_info['from']:
+                try:
+                    safe_from = self._safe_search_string(message_info['from'])
+                    if safe_from and '@' in safe_from:  # Meaningful email search
+                        status, message_ids = conn.search(None, f'FROM "{safe_from}"')
+                        if status == 'OK' and message_ids[0]:
+                            return True
+                except Exception as e:
+                    self.logger.debug(f"From search failed: {e}")
             
             return False
             
@@ -322,20 +391,27 @@ class IMAPSync:
             return False
     
     def delete_message(self, conn: imaplib.IMAP4_SSL, message_id: bytes, 
-                      dry_run: bool = False) -> bool:
+                      dry_run: bool = False, message_subject: str = '') -> bool:
         """Delete a message from the mailbox."""
         try:
+            # Convert message_id to string for consistency
+            msg_id_str = message_id.decode() if isinstance(message_id, bytes) else str(message_id)
+            
             if dry_run:
-                self.logger.info(f"DRY RUN: Would delete message {message_id.decode()}")
+                if message_subject:
+                    self.logger.info(f"DRY RUN: Would delete message {msg_id_str} - Subject: {message_subject}")
+                else:
+                    self.logger.info(f"DRY RUN: Would delete message {msg_id_str}")
                 return True
             
-            # Mark message for deletion
-            conn.store(message_id, '+FLAGS', '\\Deleted')
-            self.logger.info(f"Marked message {message_id.decode()} for deletion")
+            # Mark message for deletion (convert back to string for store command)
+            conn.store(msg_id_str, '+FLAGS', '\\Deleted')
+            self.logger.info(f"Marked message {msg_id_str} for deletion")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error deleting message {message_id.decode()}: {e}")
+            msg_id_str = message_id.decode() if isinstance(message_id, bytes) else str(message_id)
+            self.logger.error(f"Error deleting message {msg_id_str}: {e}")
             return False
     
     def run_sync(self, dry_run: bool = False) -> Dict:
@@ -357,8 +433,9 @@ class IMAPSync:
             source_folder = self.config['source_mailbox']['folder']
             target_folder = self.config['target_mailbox']['folder']
             search_criteria = self.config.get('search_criteria', {})
+            source_server = self.config['source_mailbox']['server']
             
-            message_ids = self.search_emails(self.source_conn, source_folder, search_criteria)
+            message_ids = self.search_emails(self.source_conn, source_folder, search_criteria, source_server)
             results['processed'] = len(message_ids)
             
             if not message_ids:
@@ -370,7 +447,9 @@ class IMAPSync:
                 try:
                     # Get message info from source
                     message_info = self.get_message_info(self.source_conn, message_id)
-                    self.logger.info(f"Processing: {message_info['subject'][:50]}...")
+                    # Display Unicode characters properly in logging
+                    display_subject = message_info['subject'][:50] if message_info['subject'] else '[No Subject]'
+                    self.logger.info(f"Processing: {display_subject}...")
                     
                     # Verify message exists in target
                     if self.verify_message_exists(self.target_conn, target_folder, message_info):
@@ -378,7 +457,7 @@ class IMAPSync:
                         results['verified'] += 1
                         
                         # Delete from source if verified
-                        if self.delete_message(self.source_conn, message_id, dry_run):
+                        if self.delete_message(self.source_conn, message_id, dry_run, display_subject):
                             results['deleted'] += 1
                         else:
                             results['errors'] += 1
