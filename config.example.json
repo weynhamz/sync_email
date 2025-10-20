@@ -1,4 +1,5 @@
 {
+  "_comment_gmail_folders": "For Gmail servers, when using gmail_query, the script automatically uses '[Gmail]/All Mail' for comprehensive search across all labels. The folder setting is used as fallback if All Mail is not accessible.",
   "source_mailbox": {
     "server": "imap.gmail.com",
     "port": 993,
@@ -14,6 +15,7 @@
     "folder": "INBOX"
   },
   "search_criteria": {
+    "gmail_query": "from:sender@example.com subject:\"Test Email\" after:2024/1/1",
     "subject": "Test Email",
     "from": "sender@example.com",
     "date_after": "01-Jan-2024"

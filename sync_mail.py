@@ -47,6 +47,15 @@ def check_virtual_environment():
     return in_venv
 
 
+def is_gmail_server(server: str) -> bool:
+    """Check if the server is a Gmail server."""
+    gmail_servers = [
+        'imap.gmail.com',
+        'imap.googlemail.com',
+    ]
+    return server.lower() in gmail_servers
+
+
 class IMAPSync:
     """Main class for IMAP email synchronization."""
     
@@ -131,15 +140,64 @@ class IMAPSync:
             self.logger.error(f"Unexpected error connecting to IMAP: {e}")
             raise
     
-    def search_emails(self, conn: imaplib.IMAP4_SSL, folder: str, criteria: Dict) -> List[bytes]:
-        """Search for emails matching criteria."""
+    def search_emails(self, conn: imaplib.IMAP4_SSL, folder: str, criteria: Dict, server: str = '') -> List[bytes]:
+        """Search for emails matching criteria using Gmail or standard IMAP search."""
         try:
-            # Select folder
-            status, messages = conn.select(folder)
-            if status != 'OK':
-                raise Exception(f"Failed to select folder {folder}")
+            # Check if this is a Gmail server and if Gmail search is provided
+            is_gmail = is_gmail_server(server)
             
-            # Build search criteria
+            # For Gmail with X-GM-RAW search, use [Gmail]/All Mail for comprehensive search
+            # For standard IMAP or Gmail fallback, use the specified folder
+            if is_gmail and 'gmail_query' in criteria:
+                # Try different Gmail folder variations for All Mail
+                gmail_folders = [
+                    '"[Gmail]/All Mail"',    # Quoted version
+                    '[Gmail]/All Mail',      # Original
+                    '"All Mail"',           # Simple quoted
+                    'All Mail'              # Simple
+                ]
+                
+                selected_folder = None
+                for gmail_folder in gmail_folders:
+                    try:
+                        status, messages = conn.select(gmail_folder)
+                        if status == 'OK':
+                            selected_folder = gmail_folder
+                            self.logger.info(f"Using Gmail folder '{gmail_folder}' for comprehensive search")
+                            break
+                    except Exception:
+                        continue
+                
+                if not selected_folder:
+                    # Fallback to specified folder if All Mail variations not available
+                    self.logger.info(f"Gmail All Mail folder not available, using specified folder {folder}")
+                    status, messages = conn.select(folder)
+                    if status != 'OK':
+                        raise Exception(f"Failed to select folder {folder}")
+            else:
+                # Standard folder selection for non-Gmail or standard IMAP search
+                status, messages = conn.select(folder)
+                if status != 'OK':
+                    raise Exception(f"Failed to select folder {folder}")
+            
+            if is_gmail and 'gmail_query' in criteria:
+                # Use Gmail's native search syntax (X-GM-RAW)
+                gmail_query = criteria['gmail_query']
+                self.logger.info(f"Using Gmail search: {gmail_query}")
+                
+                try:
+                    # Gmail supports X-GM-RAW for native Gmail search syntax
+                    status, message_ids = conn.search(None, 'X-GM-RAW', f'"{gmail_query}"')
+                    if status == 'OK':
+                        message_list = message_ids[0].split() if message_ids[0] else []
+                        self.logger.info(f"Found {len(message_list)} messages using Gmail search")
+                        return message_list
+                    else:
+                        self.logger.warning(f"Gmail search failed: {status}, falling back to standard search")
+                except Exception as e:
+                    self.logger.warning(f"Gmail search error: {e}, falling back to standard search")
+            
+            # Standard IMAP search (fallback or non-Gmail servers)
             search_terms = []
             
             if 'subject' in criteria:
@@ -151,12 +209,22 @@ class IMAPSync:
             if 'date_after' in criteria:
                 search_terms.append(f'SINCE "{criteria["date_after"]}"')
             
+            if 'to' in criteria:
+                search_terms.append(f'TO "{criteria["to"]}"')
+                
+            if 'body' in criteria:
+                search_terms.append(f'BODY "{criteria["body"]}"')
+                
+            if 'before_date' in criteria:
+                search_terms.append(f'BEFORE "{criteria["before_date"]}"')
+            
             # Default search if no criteria
             if not search_terms:
                 search_terms = ['ALL']
             
             search_string = ' '.join(search_terms)
-            self.logger.info(f"Searching with criteria: {search_string}")
+            search_type = "Gmail fallback" if is_gmail else "Standard IMAP"
+            self.logger.info(f"Using {search_type} search: {search_string}")
             
             # Perform search
             status, message_ids = conn.search(None, search_string)

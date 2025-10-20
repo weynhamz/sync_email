@@ -92,7 +92,9 @@ For Gmail accounts, OAuth2 is recommended over app passwords:
 
 2. **Follow the OAuth2 setup guide**: See [OAUTH2_SETUP.md](OAUTH2_SETUP.md) for detailed instructions
 
-3. **Quick OAuth2 test**:
+3. **Gmail search guide**: See [GMAIL_SEARCH.md](GMAIL_SEARCH.md) for powerful Gmail search syntax
+
+4. **Quick OAuth2 test**:
    ```bash
    python oauth2_helper.py --setup  # Show setup instructions
    python oauth2_helper.py --test   # Test configuration
@@ -247,6 +249,83 @@ You can mix authentication methods:
 }
 ```
 
+### 🔍 Search Criteria Configuration
+
+The email sync tool supports flexible search criteria with **enhanced Gmail search support**.
+
+#### **Gmail Search (Recommended for Gmail)**
+
+For Gmail servers, you can use Gmail's powerful native search syntax:
+
+```json
+{
+  "search_criteria": {
+    "gmail_query": "from:sender@example.com subject:\"Important Email\" after:2024/1/1 -label:spam"
+  }
+}
+```
+
+**Gmail Search Examples:**
+```json
+// Find emails from specific sender with attachments
+"gmail_query": "from:boss@company.com has:attachment"
+
+// Find emails in date range with specific subject
+"gmail_query": "subject:\"Project Update\" after:2024/1/1 before:2024/12/31"
+
+// Find emails excluding certain labels
+"gmail_query": "from:notifications@github.com -label:important -is:unread"
+
+// Find emails with specific labels and categories  
+"gmail_query": "label:work category:updates after:2024/6/1"
+
+// Complex query with multiple criteria
+"gmail_query": "from:client@company.com OR to:team@mycompany.com has:attachment -label:archived"
+```
+
+**Gmail Search Operators:**
+- `from:`, `to:`, `cc:`, `bcc:` - Email addresses
+- `subject:` - Subject line text
+- `after:`, `before:` - Date ranges (YYYY/MM/DD)
+- `has:attachment` - Emails with attachments
+- `label:`, `-label:` - Include/exclude labels
+- `is:unread`, `is:read` - Read status
+- `category:` - Gmail categories (updates, social, etc.)
+- `OR`, `AND` - Boolean operators
+- Parentheses for grouping: `(from:a@b.com OR from:c@d.com)`
+
+#### **Standard IMAP Search (All Providers)**
+
+For non-Gmail servers or as fallback, use standard IMAP criteria:
+
+```json
+{
+  "search_criteria": {
+    "subject": "Test Email",
+    "from": "sender@example.com", 
+    "to": "recipient@example.com",
+    "body": "keyword in body",
+    "date_after": "01-Jan-2024",
+    "before_date": "31-Dec-2024"
+  }
+}
+```
+
+#### **Mixed Configuration**
+
+You can specify both Gmail and standard criteria. Gmail search takes precedence for Gmail servers:
+
+```json
+{
+  "search_criteria": {
+    "gmail_query": "from:sender@example.com after:2024/1/1",
+    "subject": "Test Email",
+    "from": "sender@example.com",
+    "date_after": "01-Jan-2024"
+  }
+}
+```
+
 ## Usage
 
 Run the email sync script:
@@ -299,7 +378,10 @@ sync_mail/
 ├── sync_mail.py                   # Main application
 ├── oauth2_helper.py               # OAuth2 authentication
 ├── config_helper.py               # Configuration utilities
-└── OAUTH2_SETUP.md               # OAuth2 setup guide
+├── OAUTH2_SETUP.md               # OAuth2 setup guide
+├── GMAIL_SEARCH.md               # Gmail search syntax guide
+├── gmail_search_demo.py           # Gmail search demonstration
+└── test_gmail_search.py           # Gmail search tests
 ```
 
 ### 🔧 VS Code Integration

@@ -17,6 +17,7 @@
     "folder": "INBOX"
   },
   "search_criteria": {
+    "gmail_query": "from:sender@example.com subject:\"Test Email\" after:2024/1/1 -label:important",
     "subject": "Test Email",
     "from": "sender@example.com",
     "date_after": "01-Jan-2024"

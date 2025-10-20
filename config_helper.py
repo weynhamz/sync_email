@@ -63,6 +63,19 @@ def validate_config(config: Dict) -> List[str]:
         if config['log_level'].upper() not in valid_levels:
             errors.append(f"Invalid log_level: {config['log_level']}. Must be one of {valid_levels}")
     
+    # Validate search criteria if specified
+    if 'search_criteria' in config:
+        search_criteria = config['search_criteria']
+        
+        # Check if both Gmail query and standard criteria are provided (warn)
+        has_gmail_query = 'gmail_query' in search_criteria
+        standard_keys = ['subject', 'from', 'to', 'body', 'date_after', 'before_date']
+        has_standard_criteria = any(key in search_criteria for key in standard_keys)
+        
+        if has_gmail_query and has_standard_criteria:
+            # This is not an error, but worth noting
+            pass  # Gmail query takes precedence for Gmail servers
+    
     return errors
 
 
@@ -87,6 +100,7 @@ def create_sample_config() -> Dict:
             "folder": "INBOX"
         },
         "search_criteria": {
+            "gmail_query": "from:sender@example.com subject:\"Test Email\" after:2024/1/1",
             "subject": "Test Email",
             "from": "sender@example.com",
             "date_after": "01-Jan-2024"
