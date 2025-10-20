@@ -391,14 +391,19 @@ class IMAPSync:
             return False
     
     def delete_message(self, conn: imaplib.IMAP4_SSL, message_id: bytes, 
-                      dry_run: bool = False, message_subject: str = '') -> bool:
+                      dry_run: bool = False, message_subject: str = '', 
+                      current_index: int = 0, total_count: int = 0, deletion_count: int = 0) -> bool:
         """Delete a message from the mailbox."""
         try:
             # Convert message_id to string for consistency
             msg_id_str = message_id.decode() if isinstance(message_id, bytes) else str(message_id)
             
             if dry_run:
-                if message_subject:
+                if message_subject and deletion_count > 0 and total_count > 0:
+                    self.logger.info(f"({deletion_count} of {total_count}) DRY RUN: Would delete message (ID: {msg_id_str}) - Subject: {message_subject}")
+                elif message_subject and deletion_count > 0:
+                    self.logger.info(f"DRY RUN: Would delete message #{deletion_count} (ID: {msg_id_str}) - Subject: {message_subject}")
+                elif message_subject:
                     self.logger.info(f"DRY RUN: Would delete message {msg_id_str} - Subject: {message_subject}")
                 else:
                     self.logger.info(f"DRY RUN: Would delete message {msg_id_str}")
@@ -406,7 +411,12 @@ class IMAPSync:
             
             # Mark message for deletion (convert back to string for store command)
             conn.store(msg_id_str, '+FLAGS', '\\Deleted')
-            self.logger.info(f"Marked message {msg_id_str} for deletion")
+            if deletion_count > 0 and total_count > 0:
+                self.logger.info(f"({deletion_count} of {total_count}) Marked message (ID: {msg_id_str}) for deletion")
+            elif deletion_count > 0:
+                self.logger.info(f"Marked message #{deletion_count} (ID: {msg_id_str}) for deletion")
+            else:
+                self.logger.info(f"Marked message {msg_id_str} for deletion")
             return True
             
         except Exception as e:
@@ -443,21 +453,26 @@ class IMAPSync:
                 return results
             
             # Process each message
-            for message_id in message_ids:
+            total_count = len(message_ids)
+            deletion_count = 0  # Separate counter for messages to be deleted
+            for current_index, message_id in enumerate(message_ids, 1):
                 try:
                     # Get message info from source
                     message_info = self.get_message_info(self.source_conn, message_id)
                     # Display Unicode characters properly in logging
                     display_subject = message_info['subject'][:50] if message_info['subject'] else '[No Subject]'
-                    self.logger.info(f"Processing: {display_subject}...")
+                    self.logger.info(f"[{current_index}/{total_count}] Processing: {display_subject}...")
                     
                     # Verify message exists in target
                     if self.verify_message_exists(self.target_conn, target_folder, message_info):
                         self.logger.info(f"Message verified in target mailbox")
                         results['verified'] += 1
                         
+                        # Increment deletion counter
+                        deletion_count += 1
+                        
                         # Delete from source if verified
-                        if self.delete_message(self.source_conn, message_id, dry_run, display_subject):
+                        if self.delete_message(self.source_conn, message_id, dry_run, display_subject, current_index, total_count, deletion_count):
                             results['deleted'] += 1
                         else:
                             results['errors'] += 1
