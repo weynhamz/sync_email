@@ -392,22 +392,55 @@ class IMAPSync:
             return False
     
     def verify_message_exists(self, conn: imaplib.IMAP4_SSL, folder: str, 
-                            message_info: Dict) -> bool:
+                            message_info: Dict, server: str = '') -> bool:
         """Verify if a message exists in the target mailbox."""
         try:
-            # Select folder
-            conn.select(folder)
+            # Use Gmail folder optimization for target mailbox too
+            is_gmail = is_gmail_server(server)
+            
+            if is_gmail:
+                # For Gmail, try to use All Mail folder for comprehensive search
+                gmail_folders = [
+                    '"[Gmail]/All Mail"',    # Quoted version
+                    '[Gmail]/All Mail',      # Original
+                    folder                   # Fallback to specified folder
+                ]
+                
+                selected_folder = None
+                for gmail_folder in gmail_folders:
+                    try:
+                        status, messages = conn.select(gmail_folder)
+                        if status == 'OK':
+                            selected_folder = gmail_folder
+                            self.logger.debug(f"Using Gmail folder '{gmail_folder}' for verification")
+                            break
+                    except Exception:
+                        continue
+                
+                if not selected_folder:
+                    self.logger.warning(f"Could not select any Gmail folder for verification")
+                    return False
+            else:
+                # Standard folder selection for non-Gmail
+                status, messages = conn.select(folder)
+                if status != 'OK':
+                    self.logger.warning(f"Could not select folder {folder} for verification")
+                    return False
             
             # Search by Message-ID first (most reliable)
             if message_info['message_id']:
                 try:
                     # Clean Message-ID for search (remove angle brackets if present)
                     clean_msg_id = message_info['message_id'].strip('<>')
+                    self.logger.debug(f"Searching for Message-ID: {clean_msg_id}")
                     status, message_ids = conn.search(
                         None, f'HEADER "Message-ID" "{clean_msg_id}"'
                     )
                     if status == 'OK' and message_ids[0]:
+                        self.logger.debug(f"Found message by Message-ID: {message_ids[0]}")
                         return True
+                    else:
+                        self.logger.debug(f"Message-ID search returned: status={status}, ids={message_ids}")
                 except Exception as e:
                     self.logger.debug(f"Message-ID search failed: {e}")
                     # Continue to fallback search
@@ -499,6 +532,7 @@ class IMAPSync:
             target_folder = self.config['target_mailbox']['folder']
             search_criteria = self.config.get('search_criteria', {})
             source_server = self.config['source_mailbox']['server']
+            target_server = self.config['target_mailbox']['server']
             
             message_ids = self.search_emails(self.source_conn, source_folder, search_criteria, source_server)
             results['processed'] = len(message_ids)
@@ -519,7 +553,8 @@ class IMAPSync:
                     self.logger.info(f"[{current_index}/{total_count}] Processing: {display_subject}...")
                     
                     # Verify message exists in target
-                    if self.verify_message_exists(self.target_conn, target_folder, message_info):
+                    self.logger.debug(f"Verifying message in target: Message-ID={message_info.get('message_id', 'None')}, Subject={message_info.get('subject', 'None')[:30]}")
+                    if self.verify_message_exists(self.target_conn, target_folder, message_info, target_server):
                         self.logger.info(f"Message verified in target mailbox")
                         results['verified'] += 1
                         
