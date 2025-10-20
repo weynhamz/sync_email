@@ -1,6 +1,11 @@
 # Configuration files
 config.json
 
+# OAuth2 credentials and tokens (IMPORTANT: Keep these secure!)
+credentials.json
+token.json
+*.json.bak
+
 # Logs
 *.log
 

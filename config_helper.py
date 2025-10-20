@@ -5,7 +5,7 @@ Configuration validation and helper utilities for the email sync project.
 
 import json
 import sys
-from typing import Dict, ListT
+from typing import Dict, List
 import logging
 
 
@@ -31,7 +31,18 @@ def validate_config(config: Dict) -> List[str]:
     for mailbox_type in ['source_mailbox', 'target_mailbox']:
         if mailbox_type in config:
             mailbox_config = config[mailbox_type]
-            required_mailbox_keys = ['server', 'username', 'password']
+            
+            # Required keys depend on auth method
+            auth_method = mailbox_config.get('auth_method', 'password')
+            required_mailbox_keys = ['server', 'username']
+            
+            if auth_method == 'password':
+                required_mailbox_keys.append('password')
+            elif auth_method == 'oauth2':
+                # OAuth2 doesn't require password, but may have optional credential files
+                pass
+            else:
+                errors.append(f"Invalid auth_method in {mailbox_type}: {auth_method}. Must be 'password' or 'oauth2'")
             
             for key in required_mailbox_keys:
                 if key not in mailbox_config:
@@ -62,13 +73,16 @@ def create_sample_config() -> Dict:
             "server": "imap.gmail.com",
             "port": 993,
             "username": "source@gmail.com",
-            "password": "your_app_password",
+            "auth_method": "oauth2",
+            "credentials_file": "credentials.json",
+            "token_file": "token.json",
             "folder": "INBOX"
         },
         "target_mailbox": {
             "server": "imap.outlook.com",
             "port": 993,
             "username": "target@outlook.com",
+            "auth_method": "password",
             "password": "your_password", 
             "folder": "INBOX"
         },

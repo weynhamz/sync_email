@@ -1,0 +1,26 @@
+{
+  "source_mailbox": {
+    "server": "imap.gmail.com",
+    "port": 993,
+    "username": "source@gmail.com",
+    "auth_method": "oauth2",
+    "credentials_file": "credentials.json",
+    "token_file": "token.json",
+    "folder": "INBOX"
+  },
+  "target_mailbox": {
+    "server": "imap.outlook.com",
+    "port": 993,
+    "username": "target@outlook.com",
+    "auth_method": "password",
+    "password": "your_password",
+    "folder": "INBOX"
+  },
+  "search_criteria": {
+    "subject": "Test Email",
+    "from": "sender@example.com",
+    "date_after": "01-Jan-2024"
+  },
+  "log_level": "INFO",
+  "dry_run": true
+}

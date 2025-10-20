@@ -23,6 +23,13 @@ from datetime import datetime
 import os
 from email.header import decode_header
 
+# Import OAuth2 helper (optional dependency)
+try:
+    from oauth2_helper import OAuth2Helper
+    OAUTH2_AVAILABLE = True
+except ImportError:
+    OAUTH2_AVAILABLE = False
+
 
 class IMAPSync:
     """Main class for IMAP email synchronization."""
@@ -63,20 +70,42 @@ class IMAPSync:
         self.logger = logging.getLogger(__name__)
         
     def connect_imap(self, mailbox_config: Dict) -> imaplib.IMAP4_SSL:
-        """Connect to an IMAP server."""
+        """Connect to an IMAP server with support for both password and OAuth2 authentication."""
         try:
             server = mailbox_config['server']
             port = mailbox_config.get('port', 993)
             username = mailbox_config['username']
-            password = mailbox_config['password']
             
             self.logger.info(f"Connecting to {server}:{port}")
             
             # Create IMAP connection
             conn = imaplib.IMAP4_SSL(server, port)
-            conn.login(username, password)
             
-            self.logger.info(f"Successfully connected to {server} as {username}")
+            # Determine authentication method
+            auth_method = mailbox_config.get('auth_method', 'password')
+            
+            if auth_method == 'oauth2':
+                # OAuth2 authentication
+                if not OAUTH2_AVAILABLE:
+                    raise Exception(
+                        "OAuth2 authentication requested but oauth2_helper not available. "
+                        "Install dependencies: pip install google-auth google-auth-oauthlib"
+                    )
+                
+                oauth_helper = OAuth2Helper(
+                    credentials_file=mailbox_config.get('credentials_file', 'credentials.json'),
+                    token_file=mailbox_config.get('token_file', 'token.json')
+                )
+                
+                if not oauth_helper.authenticate_imap_oauth2(conn, username):
+                    raise Exception("OAuth2 authentication failed")
+                    
+            else:
+                # Traditional password authentication
+                password = mailbox_config['password']
+                conn.login(username, password)
+            
+            self.logger.info(f"Successfully connected to {server} as {username} using {auth_method}")
             return conn
             
         except imaplib.IMAP4.error as e:
