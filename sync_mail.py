@@ -357,8 +357,12 @@ class IMAPSync:
 
         return cleaned
 
-    def _try_message_id_variants(self, conn: imaplib.IMAP4_SSL, message_id: str, is_gmail: bool) -> bool:
-        """Try multiple Message-ID search variants to handle different formats."""
+    def _try_message_id_variants(self, conn: imaplib.IMAP4_SSL, message_id: str, is_gmail: bool) -> Optional[List[str]]:
+        """Try multiple Message-ID search variants to handle different formats.
+
+        Returns:
+            List of message IDs if found, None if not found
+        """
         clean_msg_id = self._clean_message_id(message_id)
         original_msg_id = message_id
 
@@ -395,15 +399,19 @@ class IMAPSync:
                 self.logger.debug(f"{search_name} result: status={status}, found={bool(message_ids[0]) if message_ids else False}")
 
                 if status == 'OK' and message_ids and message_ids[0]:
-                    self.logger.debug(f"Found message using {search_name}")
-                    return True
+                    found_ids = message_ids[0].split()
+                    if found_ids:
+                        # Convert bytes to strings and return
+                        result = [msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id) for msg_id in found_ids]
+                        self.logger.debug(f"Found {len(result)} message(s) using {search_name}")
+                        return result
             except Exception as e:
                 self.logger.debug(f"{search_name} failed: {e}")
                 continue
 
         self.logger.debug(f"All Message-ID search variants failed for: {clean_msg_id[:50]}...")
-        return False
-    
+        return None
+
     def _apply_to_delete_marker(self, conn: imaplib.IMAP4_SSL, msg_id_str: str, server: str) -> bool:
         """Apply _TO_DELETE label for Gmail or move to _TO_DELETE folder for other servers."""
         try:
@@ -544,15 +552,11 @@ class IMAPSync:
             # Search by Message-ID to find the target message
             if message_info['message_id']:
                 try:
-                    clean_msg_id = message_info['message_id'].strip('<>')
-                    status, message_ids = conn.search(
-                        None, f'HEADER "Message-ID" "{clean_msg_id}"'
-                    )
-                    if status == 'OK' and message_ids[0]:
+                    # Reuse the comprehensive Message-ID search variants to get message IDs directly
+                    found_message_ids = self._try_message_id_variants(conn, message_info['message_id'], is_gmail)
+                    if found_message_ids:
                         # Return the first found message ID
-                        found_ids = message_ids[0].split()
-                        if found_ids:
-                            return found_ids[0].decode() if isinstance(found_ids[0], bytes) else str(found_ids[0])
+                        return found_message_ids[0]
                 except Exception as e:
                     self.logger.debug(f"Error finding message in target: {e}")
 
@@ -602,7 +606,8 @@ class IMAPSync:
             # Search by Message-ID using comprehensive search strategy
             if message_info['message_id']:
                 self.logger.debug(f"Starting comprehensive Message-ID search")
-                if self._try_message_id_variants(conn, message_info['message_id'], is_gmail):
+                found_message_ids = self._try_message_id_variants(conn, message_info['message_id'], is_gmail)
+                if found_message_ids:
                     return True
 
             return False
