@@ -341,6 +341,69 @@ class IMAPSync:
         except Exception:
             return ''
 
+    def _clean_message_id(self, message_id: str) -> str:
+        """Clean Message-ID by removing various bracket formats and normalizing."""
+        if not message_id:
+            return ''
+
+        # Remove angle brackets, square brackets, and whitespace
+        cleaned = message_id.strip('<>[]').strip()
+        self.logger.debug(f"Original Message-ID: {message_id}")
+        self.logger.debug(f"Cleaned Message-ID: {cleaned}")
+
+        # Check for length issues
+        if len(cleaned) > 120:
+            self.logger.debug(f"Message-ID is very long ({len(cleaned)} chars), this may cause search issues")
+
+        return cleaned
+
+    def _try_message_id_variants(self, conn: imaplib.IMAP4_SSL, message_id: str, is_gmail: bool) -> bool:
+        """Try multiple Message-ID search variants to handle different formats."""
+        clean_msg_id = self._clean_message_id(message_id)
+        original_msg_id = message_id
+
+        # Try different search strategies
+        search_variants = []
+
+        if is_gmail:
+            # Gmail X-GM-RAW searches
+            search_variants.extend([
+                ("Gmail X-GM-RAW clean", lambda: conn.search(None, 'X-GM-RAW', f'rfc822msgid:{clean_msg_id}')),
+                ("Gmail X-GM-RAW original", lambda: conn.search(None, 'X-GM-RAW', f'rfc822msgid:{original_msg_id}')),
+            ])
+
+            # If Message-ID is very long, try searching by partial ID
+            if len(clean_msg_id) > 100:
+                # Extract first part before @ symbol
+                local_part = clean_msg_id.split('@')[0] if '@' in clean_msg_id else clean_msg_id[:50]
+                search_variants.append(
+                    ("Gmail X-GM-RAW partial", lambda: conn.search(None, 'X-GM-RAW', f'rfc822msgid:{local_part}'))
+                )
+
+        # Standard IMAP HEADER searches
+        search_variants.extend([
+            ("IMAP HEADER clean", lambda: conn.search(None, f'HEADER "Message-ID" "{clean_msg_id}"')),
+            ("IMAP HEADER with brackets", lambda: conn.search(None, f'HEADER "Message-ID" "<{clean_msg_id}>"')),
+            ("IMAP HEADER original", lambda: conn.search(None, f'HEADER "Message-ID" "{original_msg_id}"')),
+        ])
+
+        # Try each search variant
+        for search_name, search_func in search_variants:
+            try:
+                self.logger.debug(f"Trying {search_name}")
+                status, message_ids = search_func()
+                self.logger.debug(f"{search_name} result: status={status}, found={bool(message_ids[0]) if message_ids else False}")
+
+                if status == 'OK' and message_ids and message_ids[0]:
+                    self.logger.debug(f"Found message using {search_name}")
+                    return True
+            except Exception as e:
+                self.logger.debug(f"{search_name} failed: {e}")
+                continue
+
+        self.logger.debug(f"All Message-ID search variants failed for: {clean_msg_id[:50]}...")
+        return False
+    
     def _apply_to_delete_marker(self, conn: imaplib.IMAP4_SSL, msg_id_str: str, server: str) -> bool:
         """Apply _TO_DELETE label for Gmail or move to _TO_DELETE folder for other servers."""
         try:
@@ -510,6 +573,8 @@ class IMAPSync:
                 gmail_folders = [
                     '"[Gmail]/All Mail"',    # Quoted version
                     '[Gmail]/All Mail',      # Original
+                    '"All Mail"',            # Simple quoted
+                    'All Mail',              # Simple
                     folder                   # Fallback to specified folder
                 ]
 
@@ -534,45 +599,11 @@ class IMAPSync:
                     self.logger.warning(f"Could not select folder {folder} for verification")
                     return False
 
-            # Search by Message-ID first (most reliable)
+            # Search by Message-ID using comprehensive search strategy
             if message_info['message_id']:
-                try:
-                    # Clean Message-ID for search (remove angle brackets if present)
-                    clean_msg_id = message_info['message_id'].strip('<>')
-                    self.logger.debug(f"Searching for Message-ID: {clean_msg_id}")
-                    status, message_ids = conn.search(
-                        None, f'HEADER "Message-ID" "{clean_msg_id}"'
-                    )
-                    if status == 'OK' and message_ids[0]:
-                        self.logger.debug(f"Found message by Message-ID: {message_ids[0]}")
-                        return True
-                    else:
-                        self.logger.debug(f"Message-ID search returned: status={status}, ids={message_ids}")
-                except Exception as e:
-                    self.logger.debug(f"Message-ID search failed: {e}")
-                    # Continue to fallback search
-
-            # Fallback: search by subject and from (sanitize non-ASCII characters)
-            # Try individual searches to avoid complex search string parsing issues
-            if message_info['subject']:
-                try:
-                    safe_subject = self._safe_search_string(message_info['subject'])
-                    if safe_subject and len(safe_subject) >= 5:  # Meaningful subject search
-                        status, message_ids = conn.search(None, f'SUBJECT "{safe_subject}"')
-                        if status == 'OK' and message_ids[0]:
-                            return True
-                except Exception as e:
-                    self.logger.debug(f"Subject search failed: {e}")
-
-            if message_info['from']:
-                try:
-                    safe_from = self._safe_search_string(message_info['from'])
-                    if safe_from and '@' in safe_from:  # Meaningful email search
-                        status, message_ids = conn.search(None, f'FROM "{safe_from}"')
-                        if status == 'OK' and message_ids[0]:
-                            return True
-                except Exception as e:
-                    self.logger.debug(f"From search failed: {e}")
+                self.logger.debug(f"Starting comprehensive Message-ID search")
+                if self._try_message_id_variants(conn, message_info['message_id'], is_gmail):
+                    return True
 
             return False
 
