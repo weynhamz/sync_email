@@ -391,6 +391,113 @@ class IMAPSync:
             self.logger.error(f"Error applying _TO_DELETE marker: {e}")
             return False
 
+    def _apply_migrated_marker(self, conn: imaplib.IMAP4_SSL, message_info: Dict, server: str, folder: str) -> bool:
+        """Apply _MIGRATED label for Gmail or move to _MIGRATED folder for other servers."""
+        try:
+            # First, find the message in the target mailbox
+            target_message_id = self._find_message_in_target(conn, message_info, server, folder)
+            if not target_message_id:
+                self.logger.debug(f"Could not find message in target for _MIGRATED marker")
+                return False
+
+            if is_gmail_server(server):
+                # For Gmail, add the _MIGRATED label
+                try:
+                    # Add the label using Gmail's X-GM-LABELS extension
+                    status, response = conn.store(target_message_id, '+X-GM-LABELS', '("_MIGRATED")')
+                    if status == 'OK':
+                        self.logger.debug(f"Added _MIGRATED label to Gmail message {target_message_id}")
+                        return True
+                    else:
+                        # Fallback: try standard IMAP flags if X-GM-LABELS doesn't work
+                        status, response = conn.store(target_message_id, '+FLAGS', '(_MIGRATED)')
+                        return status == 'OK'
+                except Exception as e:
+                    self.logger.debug(f"Gmail _MIGRATED label failed, trying standard flag: {e}")
+                    # Fallback to standard IMAP flag
+                    status, response = conn.store(target_message_id, '+FLAGS', '(_MIGRATED)')
+                    return status == 'OK'
+            else:
+                # For other IMAP servers, try to copy to _MIGRATED folder
+                try:
+                    # First, ensure the _MIGRATED folder exists
+                    try:
+                        conn.create('_MIGRATED')
+                    except Exception:
+                        pass  # Folder might already exist
+
+                    # Copy the message to _MIGRATED folder
+                    status, response = conn.copy(target_message_id, '_MIGRATED')
+                    if status == 'OK':
+                        self.logger.debug(f"Copied message {target_message_id} to _MIGRATED folder")
+                        return True
+                    else:
+                        # Fallback: just add a flag
+                        status, response = conn.store(target_message_id, '+FLAGS', '(_MIGRATED)')
+                        return status == 'OK'
+                except Exception as e:
+                    self.logger.debug(f"Failed to copy message to _MIGRATED folder: {e}")
+                    # Final fallback: just add a flag
+                    status, response = conn.store(target_message_id, '+FLAGS', '(_MIGRATED)')
+                    return status == 'OK'
+        except Exception as e:
+            self.logger.error(f"Error applying _MIGRATED marker: {e}")
+            return False
+
+    def _find_message_in_target(self, conn: imaplib.IMAP4_SSL, message_info: Dict, server: str, folder: str) -> str:
+        """Find the message ID in the target mailbox for applying markers."""
+        try:
+            # Use the same folder selection logic as verify_message_exists
+            is_gmail = is_gmail_server(server)
+
+            if is_gmail:
+                # For Gmail, try to use All Mail folder
+                gmail_folders = [
+                    '"[Gmail]/All Mail"',    # Quoted version
+                    '[Gmail]/All Mail',      # Original
+                    '"All Mail"',            # Simple quoted
+                    'All Mail',              # Simple
+                    folder                   # Fallback to specified folder
+                ]
+
+                selected_folder = None
+                for gmail_folder in gmail_folders:
+                    try:
+                        status, messages = conn.select(gmail_folder)
+                        if status == 'OK':
+                            selected_folder = gmail_folder
+                            break
+                    except Exception:
+                        continue
+
+                if not selected_folder:
+                    return ''
+            else:
+                # Standard folder selection for non-Gmail
+                status, messages = conn.select(folder)
+                if status != 'OK':
+                    return ''
+
+            # Search by Message-ID to find the target message
+            if message_info['message_id']:
+                try:
+                    clean_msg_id = message_info['message_id'].strip('<>')
+                    status, message_ids = conn.search(
+                        None, f'HEADER "Message-ID" "{clean_msg_id}"'
+                    )
+                    if status == 'OK' and message_ids[0]:
+                        # Return the first found message ID
+                        found_ids = message_ids[0].split()
+                        if found_ids:
+                            return found_ids[0].decode() if isinstance(found_ids[0], bytes) else str(found_ids[0])
+                except Exception as e:
+                    self.logger.debug(f"Error finding message in target: {e}")
+
+            return ''
+        except Exception as e:
+            self.logger.debug(f"Error in _find_message_in_target: {e}")
+            return ''
+
     def verify_message_exists(self, conn: imaplib.IMAP4_SSL, folder: str,
                             message_info: Dict, server: str = '') -> bool:
         """Verify if a message exists in the target mailbox."""
@@ -557,6 +664,9 @@ class IMAPSync:
                     if self.verify_message_exists(self.target_conn, target_folder, message_info, target_server):
                         self.logger.info(f"Message verified in target mailbox")
                         results['verified'] += 1
+
+                        # Apply _MIGRATED marker to target mailbox for verification
+                        self._apply_migrated_marker(self.target_conn, message_info, target_server, target_folder)
 
                         # Increment deletion counter
                         deletion_count += 1
