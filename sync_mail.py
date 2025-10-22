@@ -403,6 +403,25 @@ class IMAPSync:
                     if found_ids:
                         # Convert bytes to strings and return
                         result = [msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id) for msg_id in found_ids]
+
+                        # Check if multiple IDs found - this indicates a problem since Message-IDs should be unique
+                        if len(found_ids) > 1:
+                            for i, msg_id in enumerate(result):
+                                self.logger.debug(f"Found message ID {i+1}: {msg_id}")
+                                # For debugging, fetch the message subject
+                                try:
+                                    temp_status, temp_data = conn.fetch(msg_id, '(RFC822.HEADER)')
+                                    if temp_status == 'OK' and temp_data and temp_data[0] and len(temp_data[0]) >= 2:
+                                        header_data = temp_data[0][1]
+                                        if isinstance(header_data, bytes):
+                                            temp_email = email.message_from_bytes(header_data)
+                                            temp_subject = self._decode_header(temp_email.get('Subject', ''))
+                                            self.logger.debug(f"  Subject: {temp_subject[:100]}")
+                                except Exception as debug_e:
+                                    self.logger.debug(f"  Could not fetch subject for debugging: {debug_e}")
+                            self.logger.debug(f"{search_name} found {len(found_ids)} messages - Message-IDs should be unique, skipping this variant")
+                            continue
+
                         self.logger.debug(f"Found {len(result)} message(s) using {search_name}")
                         return result
             except Exception as e:
